@@ -35,6 +35,8 @@ func main() {
 	})
 	mux.HandleFunc("POST /secrets", srv.handleCreateSecret)
 	mux.HandleFunc("GET /secrets/{name}", srv.handleGetSecret)
+	mux.HandleFunc("POST /secrets/{name}/versions", srv.handleAddVersion)
+	mux.HandleFunc("GET /secrets/{name}/versions", srv.handleListVersions)
 	mux.HandleFunc("GET /secrets/{name}/versions/{version}", srv.handleGetSecretVersion)
 
 	// Localhost only until authentication exists.

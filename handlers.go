@@ -21,6 +21,10 @@ type createSecretRequest struct {
 	Value string `json:"value"`
 }
 
+type addVersionRequest struct {
+	Value string `json:"value"`
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -74,6 +78,77 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"name":    req.Name,
 		"version": version,
+	})
+}
+
+// handleAddVersion writes a new version of an existing secret (rotate).
+func (s *Server) handleAddVersion(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !validName.MatchString(name) {
+		writeError(w, http.StatusBadRequest, "invalid secret name")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+	var req addVersionRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Value == "" {
+		writeError(w, http.StatusBadRequest, "value is required")
+		return
+	}
+
+	ciphertext, nonce, err := s.crypter.Encrypt([]byte(req.Value))
+	if err != nil {
+		log.Printf("encrypt: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	version, err := s.store.AddVersion(name, ciphertext, nonce)
+	if errors.Is(err, ErrNotFound) {
+		writeError(w, http.StatusNotFound, "secret not found")
+		return
+	}
+	if err != nil {
+		log.Printf("add version: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"name":    name,
+		"version": version,
+	})
+}
+
+// handleListVersions lists version numbers and timestamps, never values.
+func (s *Server) handleListVersions(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !validName.MatchString(name) {
+		writeError(w, http.StatusBadRequest, "invalid secret name")
+		return
+	}
+
+	versions, err := s.store.ListVersions(name)
+	if errors.Is(err, ErrNotFound) {
+		writeError(w, http.StatusNotFound, "secret not found")
+		return
+	}
+	if err != nil {
+		log.Printf("list versions: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name":     name,
+		"versions": versions,
 	})
 }
 

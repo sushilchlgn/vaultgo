@@ -18,6 +18,12 @@ type SecretVersion struct {
 	CreatedAt  string
 }
 
+// VersionInfo is the metadata of a version, with no secret material.
+type VersionInfo struct {
+	Version   int    `json:"version"`
+	CreatedAt string `json:"created_at"`
+}
+
 type Store struct {
 	db *sql.DB
 }
@@ -62,6 +68,66 @@ func (s *Store) CreateSecret(name string, ciphertext, nonce []byte) (int, error)
 	}
 
 	return 1, nil
+}
+
+// AddVersion appends a new version to an existing secret and returns its number.
+// The next version number is computed inside the INSERT itself, so the
+// read-and-write is one atomic statement. The UNIQUE (secret_id, version)
+// constraint is the backstop if two writers ever collide.
+func (s *Store) AddVersion(name string, ciphertext, nonce []byte) (int, error) {
+	var version int
+	err := s.db.QueryRow(
+		`INSERT INTO secret_versions (secret_id, version, ciphertext, nonce)
+		 SELECT s.id,
+		        COALESCE((SELECT MAX(version) FROM secret_versions WHERE secret_id = s.id), 0) + 1,
+		        ?, ?
+		 FROM secrets s
+		 WHERE s.name = ?
+		 RETURNING version`,
+		ciphertext, nonce, name,
+	).Scan(&version)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	return version, nil
+}
+
+// ListVersions returns version numbers and timestamps, newest first.
+func (s *Store) ListVersions(name string) ([]VersionInfo, error) {
+	rows, err := s.db.Query(
+		`SELECT v.version, v.created_at
+		 FROM secrets s
+		 JOIN secret_versions v ON v.secret_id = s.id
+		 WHERE s.name = ?
+		 ORDER BY v.version DESC`,
+		name,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []VersionInfo
+	for rows.Next() {
+		var vi VersionInfo
+		if err := rows.Scan(&vi.Version, &vi.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, vi)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Every secret has at least one version, so empty means it doesn't exist.
+	if len(out) == 0 {
+		return nil, ErrNotFound
+	}
+	return out, nil
 }
 
 // GetLatestVersion returns the newest version of the named secret.
