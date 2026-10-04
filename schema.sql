@@ -13,3 +13,11 @@ CREATE TABLE IF NOT EXISTS secret_versions (
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (secret_id, version)
 );
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    key_hash    TEXT NOT NULL UNIQUE,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revoked_at  DATETIME
+);
