@@ -11,7 +11,7 @@ import (
 
 type Server struct {
 	store   *Store
-	crypter *Crypter
+	keyring *Keyring
 }
 
 var validName = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,100}$`)
@@ -69,14 +69,14 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ciphertext, nonce, err := s.crypter.Encrypt([]byte(req.Value))
+	ciphertext, nonce, keyID, err := s.keyring.Encrypt([]byte(req.Value))
 	if err != nil {
 		log.Printf("encrypt: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	version, err := s.store.CreateSecret(req.Name, ciphertext, nonce)
+	version, err := s.store.CreateSecret(req.Name, ciphertext, nonce, keyID)
 	if errors.Is(err, ErrSecretExists) {
 		writeError(w, http.StatusConflict, "a secret with that name already exists")
 		return
@@ -118,14 +118,14 @@ func (s *Server) handleAddVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ciphertext, nonce, err := s.crypter.Encrypt([]byte(req.Value))
+	ciphertext, nonce, keyID, err := s.keyring.Encrypt([]byte(req.Value))
 	if err != nil {
 		log.Printf("encrypt: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	version, err := s.store.AddVersion(name, ciphertext, nonce)
+	version, err := s.store.AddVersion(name, ciphertext, nonce, keyID)
 	if errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusNotFound, "secret not found")
 		return
@@ -211,10 +211,11 @@ func (s *Server) respondWithVersion(w http.ResponseWriter, r *http.Request, name
 		return
 	}
 
-	plaintext, err := s.crypter.Decrypt(sv.Ciphertext, sv.Nonce)
+	plaintext, err := s.keyring.Decrypt(sv.KeyID, sv.Ciphertext, sv.Nonce)
 	if err != nil {
-		// Wrong key or tampered data. Log it, but tell the client nothing.
-		log.Printf("decrypt %q v%d: %v", name, sv.Version, err)
+		// Wrong key, a key missing from the ring, or tampered data.
+		// Log it, but tell the client nothing.
+		log.Printf("decrypt %q v%d (key %d): %v", name, sv.Version, sv.KeyID, err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}

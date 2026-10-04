@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS secret_versions (
     version     INTEGER NOT NULL,
     ciphertext  BLOB NOT NULL,
     nonce       BLOB NOT NULL,
+    key_id      INTEGER NOT NULL DEFAULT 1,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (secret_id, version)
 );

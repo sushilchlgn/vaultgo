@@ -9,8 +9,8 @@ import (
 )
 
 func main() {
-	// Subcommands (createkey, grant, revoke, listkeys, audit, gencert)
-	// run and exit.
+	// Subcommands (createkey, grant, revoke, listkeys, audit, gencert,
+	// genkey, keystatus, rewrap) run and exit.
 	if runCommand(os.Args[1:]) {
 		return
 	}
@@ -42,20 +42,17 @@ func main() {
 	defer db.Close()
 	log.Println("database ready")
 
-	key, err := loadMasterKey()
+	keyring, err := loadKeyring()
 	if err != nil {
 		log.Fatalf("master key: %v", err)
 	}
-	crypter, err := NewCrypter(key)
-	if err != nil {
-		log.Fatalf("crypto: %v", err)
-	}
-	log.Println("encryption ready")
+	log.Printf("encryption ready (current key id %d, %d key(s) loaded)",
+		keyring.CurrentID(), keyring.Size())
 
 	store := NewStore(db)
 	srv := &Server{
 		store:   store,
-		crypter: crypter,
+		keyring: keyring,
 	}
 
 	mux := http.NewServeMux()

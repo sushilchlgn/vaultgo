@@ -15,6 +15,7 @@ type SecretVersion struct {
 	Version    int
 	Ciphertext []byte
 	Nonce      []byte
+	KeyID      int
 	CreatedAt  string
 }
 
@@ -34,7 +35,7 @@ func NewStore(db *sql.DB) *Store {
 
 // CreateSecret inserts a new secret and its first version in one transaction,
 // so you never end up with a secret that has no version.
-func (s *Store) CreateSecret(name string, ciphertext, nonce []byte) (int, error) {
+func (s *Store) CreateSecret(name string, ciphertext, nonce []byte, keyID int) (int, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
@@ -55,9 +56,9 @@ func (s *Store) CreateSecret(name string, ciphertext, nonce []byte) (int, error)
 	}
 
 	_, err = tx.Exec(
-		`INSERT INTO secret_versions (secret_id, version, ciphertext, nonce)
-		 VALUES (?, 1, ?, ?)`,
-		secretID, ciphertext, nonce,
+		`INSERT INTO secret_versions (secret_id, version, ciphertext, nonce, key_id)
+		 VALUES (?, 1, ?, ?, ?)`,
+		secretID, ciphertext, nonce, keyID,
 	)
 	if err != nil {
 		return 0, err
@@ -74,17 +75,17 @@ func (s *Store) CreateSecret(name string, ciphertext, nonce []byte) (int, error)
 // The next version number is computed inside the INSERT itself, so the
 // read-and-write is one atomic statement. The UNIQUE (secret_id, version)
 // constraint is the backstop if two writers ever collide.
-func (s *Store) AddVersion(name string, ciphertext, nonce []byte) (int, error) {
+func (s *Store) AddVersion(name string, ciphertext, nonce []byte, keyID int) (int, error) {
 	var version int
 	err := s.db.QueryRow(
-		`INSERT INTO secret_versions (secret_id, version, ciphertext, nonce)
+		`INSERT INTO secret_versions (secret_id, version, ciphertext, nonce, key_id)
 		 SELECT s.id,
 		        COALESCE((SELECT MAX(version) FROM secret_versions WHERE secret_id = s.id), 0) + 1,
-		        ?, ?
+		        ?, ?, ?
 		 FROM secrets s
 		 WHERE s.name = ?
 		 RETURNING version`,
-		ciphertext, nonce, name,
+		ciphertext, nonce, keyID, name,
 	).Scan(&version)
 
 	if errors.Is(err, sql.ErrNoRows) {
@@ -133,7 +134,7 @@ func (s *Store) ListVersions(name string) ([]VersionInfo, error) {
 // GetLatestVersion returns the newest version of the named secret.
 func (s *Store) GetLatestVersion(name string) (*SecretVersion, error) {
 	row := s.db.QueryRow(
-		`SELECT v.version, v.ciphertext, v.nonce, v.created_at
+		`SELECT v.version, v.ciphertext, v.nonce, v.key_id, v.created_at
 		 FROM secrets s
 		 JOIN secret_versions v ON v.secret_id = s.id
 		 WHERE s.name = ?
@@ -147,7 +148,7 @@ func (s *Store) GetLatestVersion(name string) (*SecretVersion, error) {
 // GetVersion returns one specific version of the named secret.
 func (s *Store) GetVersion(name string, version int) (*SecretVersion, error) {
 	row := s.db.QueryRow(
-		`SELECT v.version, v.ciphertext, v.nonce, v.created_at
+		`SELECT v.version, v.ciphertext, v.nonce, v.key_id, v.created_at
 		 FROM secrets s
 		 JOIN secret_versions v ON v.secret_id = s.id
 		 WHERE s.name = ? AND v.version = ?`,
@@ -158,7 +159,7 @@ func (s *Store) GetVersion(name string, version int) (*SecretVersion, error) {
 
 func scanVersion(row *sql.Row) (*SecretVersion, error) {
 	var sv SecretVersion
-	err := row.Scan(&sv.Version, &sv.Ciphertext, &sv.Nonce, &sv.CreatedAt)
+	err := row.Scan(&sv.Version, &sv.Ciphertext, &sv.Nonce, &sv.KeyID, &sv.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
