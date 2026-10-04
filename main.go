@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"log"
 	"net/http"
 	"os"
@@ -8,9 +9,30 @@ import (
 )
 
 func main() {
-	// Subcommands (createkey, grant, revoke, listkeys, audit) run and exit.
+	// Subcommands (createkey, grant, revoke, listkeys, audit, gencert)
+	// run and exit.
 	if runCommand(os.Args[1:]) {
 		return
+	}
+
+	// Decide how to listen BEFORE touching anything else, and fail closed.
+	certFile := os.Getenv("VAULT_TLS_CERT")
+	keyFile := os.Getenv("VAULT_TLS_KEY")
+	if (certFile == "") != (keyFile == "") {
+		log.Fatal("set both VAULT_TLS_CERT and VAULT_TLS_KEY, or neither")
+	}
+	useTLS := certFile != ""
+
+	addr := os.Getenv("VAULT_ADDR")
+	if addr == "" {
+		if useTLS {
+			addr = "127.0.0.1:8443"
+		} else {
+			addr = "127.0.0.1:8080"
+		}
+	}
+	if !useTLS && !isLoopbackAddr(addr) {
+		log.Fatalf("refusing to listen on %s without TLS: set VAULT_TLS_CERT and VAULT_TLS_KEY, or bind to a loopback address", addr)
 	}
 
 	db, err := openDB("vault.db")
@@ -64,10 +86,8 @@ func main() {
 	handler := rateLimit(store, NewLimits(), mux)
 
 	// Timeouts defend against slow-connection attacks that hold sockets open.
-	// Localhost only for now. We are not exposing this to a network until
-	// TLS is in place.
 	httpServer := &http.Server{
-		Addr:              "127.0.0.1:8080",
+		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -76,7 +96,16 @@ func main() {
 		MaxHeaderBytes:    1 << 16,
 	}
 
-	log.Printf("vaultgo listening on %s", httpServer.Addr)
+	if useTLS {
+		httpServer.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		log.Printf("vaultgo listening on https://%s", addr)
+		if err := httpServer.ListenAndServeTLS(certFile, keyFile); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
+	log.Printf("vaultgo listening on http://%s (no TLS, loopback only)", addr)
 	if err := httpServer.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}

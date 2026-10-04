@@ -15,8 +15,15 @@ const usage = `usage:
   go run . revoke <name>                disable a key immediately
   go run . listkeys                     list all keys
   go run . audit [count]                show recent audit entries
+  go run . gencert                      make a development TLS certificate
 
-scopes look like: "read:db-*,write:db-password"`
+scopes look like: "read:db-*,write:db-password"
+
+environment:
+  VAULT_MASTER_KEY   64 hex characters (required to run the server)
+  VAULT_TLS_CERT     path to a TLS certificate (enables HTTPS with VAULT_TLS_KEY)
+  VAULT_TLS_KEY      path to the matching private key
+  VAULT_ADDR         listen address (default 127.0.0.1:8443 with TLS, 127.0.0.1:8080 without)`
 
 // openStore opens the database for a command-line command.
 func openStore() (*Store, func()) {
@@ -66,11 +73,30 @@ func runCommand(args []string) bool {
 			limit = n
 		}
 		runAudit(limit)
+	case "gencert":
+		runGenCert()
 	default:
 		fmt.Println(usage)
 		os.Exit(1)
 	}
 	return true
+}
+
+// runGenCert makes a development certificate in ./certs.
+func runGenCert() {
+	certPath, keyPath, err := generateSelfSignedCert("certs")
+	if err != nil {
+		log.Fatalf("gencert: %v", err)
+	}
+
+	fmt.Println("Development certificate created (valid for 1 year, for localhost only):")
+	fmt.Println("  certificate:", certPath)
+	fmt.Println("  private key:", keyPath)
+	fmt.Println()
+	fmt.Println("Keep the certs folder out of git. To start the server with HTTPS:")
+	fmt.Printf("  $env:VAULT_TLS_CERT = %q\n", certPath)
+	fmt.Printf("  $env:VAULT_TLS_KEY  = %q\n", keyPath)
+	fmt.Println("  go run .")
 }
 
 // runCreateKey is the bootstrap path: only someone with access to the
