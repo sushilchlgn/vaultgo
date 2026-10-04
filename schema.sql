@@ -1,0 +1,15 @@
+CREATE TABLE IF NOT EXISTS secrets (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS secret_versions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    secret_id   INTEGER NOT NULL REFERENCES secrets(id),
+    version     INTEGER NOT NULL,
+    ciphertext  BLOB NOT NULL,
+    nonce       BLOB NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (secret_id, version)
+);
