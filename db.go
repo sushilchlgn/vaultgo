@@ -12,7 +12,7 @@ var schema string
 
 // openDB opens (or creates) the SQLite file and makes sure the tables exist.
 func openDB(path string) (*sql.DB, error) {
-	dsn := "file:" + path + "?_pragma=foreign_keys(1)"
+	dsn := "file:" + path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {

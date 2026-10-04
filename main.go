@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 )
 
 func main() {
@@ -29,8 +30,9 @@ func main() {
 	}
 	log.Println("encryption ready")
 
+	store := NewStore(db)
 	srv := &Server{
-		store:   NewStore(db),
+		store:   store,
 		crypter: crypter,
 	}
 
@@ -57,11 +59,25 @@ func main() {
 	mux.HandleFunc("GET /secrets/{name}/versions/{version}",
 		srv.requireAuth(srv.audit("read", srv.requireScope("read", srv.handleGetSecretVersion))))
 
+	// Rate limiting wraps the entire router, so it applies to every route
+	// and rejects abusive clients before any database work happens.
+	handler := rateLimit(store, NewLimits(), mux)
+
+	// Timeouts defend against slow-connection attacks that hold sockets open.
 	// Localhost only for now. We are not exposing this to a network until
 	// TLS is in place.
-	addr := "127.0.0.1:8080"
-	log.Printf("vaultgo listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	httpServer := &http.Server{
+		Addr:              "127.0.0.1:8080",
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 16,
+	}
+
+	log.Printf("vaultgo listening on %s", httpServer.Addr)
+	if err := httpServer.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
