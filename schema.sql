@@ -29,3 +29,28 @@ CREATE TABLE IF NOT EXISTS key_scopes (
     pattern TEXT NOT NULL,
     UNIQUE (key_id, action, pattern)
 );
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    key_id      INTEGER,
+    key_name    TEXT NOT NULL DEFAULT '',
+    action      TEXT NOT NULL,
+    secret_name TEXT NOT NULL DEFAULT '',
+    version     INTEGER,
+    status      INTEGER NOT NULL,
+    outcome     TEXT NOT NULL,
+    ip          TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TRIGGER IF NOT EXISTS audit_log_no_update
+BEFORE UPDATE ON audit_log
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS audit_log_no_delete
+BEFORE DELETE ON audit_log
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log is append-only');
+END;

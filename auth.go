@@ -35,20 +35,20 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 		h := r.Header.Get("Authorization")
 		if !strings.HasPrefix(h, prefix) {
-			unauthorized(w)
+			s.rejectUnauthorized(w, r)
 			return
 		}
 
 		key := strings.TrimSpace(strings.TrimPrefix(h, prefix))
 		if key == "" {
-			unauthorized(w)
+			s.rejectUnauthorized(w, r)
 			return
 		}
 
 		id, name, err := s.store.ValidateAPIKey(key)
 		if errors.Is(err, ErrInvalidKey) {
 			// Same response as "missing", so attackers learn nothing.
-			unauthorized(w)
+			s.rejectUnauthorized(w, r)
 			return
 		}
 		if err != nil {

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 // runCreateKey is the bootstrap path: only someone with access to the
@@ -67,6 +68,39 @@ func runGrant(keyName, scopeArg string) {
 	fmt.Println("Granted", scopeArg, "to", keyName)
 }
 
+// runAudit prints the most recent audit entries.
+func runAudit(limit int) {
+	db, err := openDB("vault.db")
+	if err != nil {
+		log.Fatalf("database: %v", err)
+	}
+	defer db.Close()
+
+	entries, err := NewStore(db).RecentAudit(limit)
+	if err != nil {
+		log.Fatalf("audit: %v", err)
+	}
+
+	fmt.Printf("%-20s %-14s %-7s %-16s %-4s %-6s %-16s %s\n",
+		"TIME (UTC)", "KEY", "ACTION", "SECRET", "VER", "STATUS", "OUTCOME", "IP")
+	for _, e := range entries {
+		ver := "-"
+		if e.Version != 0 {
+			ver = strconv.Itoa(e.Version)
+		}
+		key := e.KeyName
+		if key == "" {
+			key = "-"
+		}
+		secret := e.SecretName
+		if secret == "" {
+			secret = "-"
+		}
+		fmt.Printf("%-20s %-14s %-7s %-16s %-4s %-6d %-16s %s\n",
+			e.At, key, e.Action, secret, ver, e.Status, e.Outcome, e.IP)
+	}
+}
+
 func main() {
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {
@@ -84,6 +118,18 @@ func main() {
 				os.Exit(1)
 			}
 			runGrant(os.Args[2], os.Args[3])
+			return
+		case "audit":
+			limit := 20
+			if len(os.Args) >= 3 {
+				n, err := strconv.Atoi(os.Args[2])
+				if err != nil || n < 1 || n > 1000 {
+					fmt.Println("usage: go run . audit [count 1-1000]")
+					os.Exit(1)
+				}
+				limit = n
+			}
+			runAudit(limit)
 			return
 		}
 	}
@@ -112,23 +158,26 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Health stays open so monitoring can reach it.
+	// Health stays open so monitoring can reach it. It is not audited,
+	// because monitoring hits it constantly and it exposes nothing.
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	// Every secrets route needs a valid key (authentication), and then a
-	// scope that covers this secret and action (authorization).
+	// Layers, outermost first:
+	//   requireAuth  - who are you? (failed attempts are audited)
+	//   audit        - record the request and its outcome
+	//   requireScope - are you allowed? (denials are audited)
 	mux.HandleFunc("POST /secrets",
-		srv.requireAuth(srv.handleCreateSecret)) // scope checked inside the handler
+		srv.requireAuth(srv.audit("create", srv.handleCreateSecret)))
 	mux.HandleFunc("GET /secrets/{name}",
-		srv.requireAuth(srv.requireScope("read", srv.handleGetSecret)))
+		srv.requireAuth(srv.audit("read", srv.requireScope("read", srv.handleGetSecret))))
 	mux.HandleFunc("POST /secrets/{name}/versions",
-		srv.requireAuth(srv.requireScope("write", srv.handleAddVersion)))
+		srv.requireAuth(srv.audit("rotate", srv.requireScope("write", srv.handleAddVersion))))
 	mux.HandleFunc("GET /secrets/{name}/versions",
-		srv.requireAuth(srv.requireScope("read", srv.handleListVersions)))
+		srv.requireAuth(srv.audit("list", srv.requireScope("read", srv.handleListVersions))))
 	mux.HandleFunc("GET /secrets/{name}/versions/{version}",
-		srv.requireAuth(srv.requireScope("read", srv.handleGetSecretVersion)))
+		srv.requireAuth(srv.audit("read", srv.requireScope("read", srv.handleGetSecretVersion))))
 
 	// Localhost only for now. We are not exposing this to a network until
 	// TLS is in place.
