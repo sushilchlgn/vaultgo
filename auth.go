@@ -9,14 +9,14 @@ import (
 )
 
 type Caller struct {
-	ID   int64
-	Name string
+	ID     int64
+	Name   string
+	Scopes []Scope
 }
 
 type ctxKey struct{}
 
 // callerFromContext returns the authenticated caller for a request.
-// The audit logging step will use this.
 func callerFromContext(ctx context.Context) (Caller, bool) {
 	c, ok := ctx.Value(ctxKey{}).(Caller)
 	return c, ok
@@ -28,7 +28,7 @@ func unauthorized(w http.ResponseWriter) {
 }
 
 // requireAuth wraps a handler so it only runs for requests carrying a valid
-// "Authorization: Bearer <key>" header.
+// "Authorization: Bearer <key>" header. It also loads the caller's scopes.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const prefix = "Bearer "
@@ -57,7 +57,15 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), ctxKey{}, Caller{ID: id, Name: name})
+		scopes, err := s.store.LoadScopes(id)
+		if err != nil {
+			log.Printf("load scopes: %v", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+
+		caller := Caller{ID: id, Name: name, Scopes: scopes}
+		ctx := context.WithValue(r.Context(), ctxKey{}, caller)
 		next(w, r.WithContext(ctx))
 	}
 }

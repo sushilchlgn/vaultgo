@@ -51,6 +51,15 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name must be 1-100 characters: letters, digits, '.', '_' or '-'")
 		return
 	}
+
+	// The name is in the body, so the scope check happens here
+	// instead of in the requireScope middleware.
+	caller, _ := callerFromContext(r.Context())
+	if !caller.Allowed("write", req.Name) {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+
 	if req.Value == "" {
 		writeError(w, http.StatusBadRequest, "value is required")
 		return

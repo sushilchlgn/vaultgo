@@ -21,3 +21,11 @@ CREATE TABLE IF NOT EXISTS api_keys (
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     revoked_at  DATETIME
 );
+
+CREATE TABLE IF NOT EXISTS key_scopes (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_id  INTEGER NOT NULL REFERENCES api_keys(id),
+    action  TEXT NOT NULL CHECK (action IN ('read', 'write')),
+    pattern TEXT NOT NULL,
+    UNIQUE (key_id, action, pattern)
+);
